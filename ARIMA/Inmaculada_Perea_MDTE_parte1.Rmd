@@ -1,0 +1,398 @@
+---
+title: "Modelos para datos temporales y espaciales"
+subtitle: 'Trabajo evaluación MDTE (Temas 1 a 4)'
+date: "Julio 2017"
+output: pdf_document
+---
+
+El alumno debe aplicar los modelos ARIMA a un conjunto de datos reales. El conjunto de datos puede seleccionarse de cualquier fuente disponible en la web, por ejemplo www.ine.es.
+
+
+# 1 Introducción
+
+## 1.1 Información del alumno
+
+* **Nombre**: Inmaculada
+* **Apellidos**: Perea Fernández
+
+
+## 1.2 Carga de librerías necesarias
+
+```{r message=FALSE, warning=FALSE}
+if (!require('tseries')) install.packages('tseries'); library('tseries')
+if (!require('forecast')) install.packages('forecast'); library('forecast')
+```
+
+
+## 1.3 Datos usados
+
+### 1.3.1 Fuente
+
+Los datos utilizados para este ejercicio de evaluación se han obtenido del *Instituto Nacional de Estadística* (INE).
+
+
+Se pueden descargar:
+
+1) Accediendo al siguiente enlace http://www.ine.es/jaxiT3/Tabla.htm?t=20239
+
+2) Navegando por las siguientes secciones: *INEbase > Servicios > Transporte > Estadística de transporte de viajeros > Total de viajeros por tipo, medio de transporte (terrestre, aéreo y maritimo) y distancia*
+
+
+### 1.3.2 Descripción
+
+La Estadística de transporte de viajeros (TV) tiene como objetivo proporcionar información mensual sobre el número de viajeros transportados en transporte urbano (autobús y metro), interurbano (autobús, ferrocarril, avión y barco) y especial y discrecional por autobús.
+El transporte por autobús se investiga mediante una encuesta por muestreo. 
+
+Para el transporte por ferrocarril el número de viajeros se calcula a partir de la información suministrada por los operadores ferroviarios (RENFE y otras empresas autonómicas). La información para el transporte aéreo es suministrada por Aviación Civil y para el transporte marítimo el número de pasajeros desembarcados se elabora a partir de la información de Puertos del Estado.
+
+
+* Tipo de encuesta: continua de periodicidad mensual.
+
+* Ámbito poblacional: empresas que se dedican al transporte de viajeros con independencia de su actividad principal.
+
+* Ámbito geográfico: todo el territorio nacional.
+
+* Período de referencia de la información: mes
+
+* Tamaño muestral: aproximadamente 1.500 empresas
+
+* Tipo de muestreo: muestreo aleatorio estratificado de empresas, según CCAA, número de asalariados y tipo de transporte.
+
+* Método de recogida: cumplimentación del cuestionario por parte del informante usando alguna de las siguientes vías: internet (sistema IRIA), correo electrónico, fax, teléfono o vía postal.
+
+
+
+### 1.3.3 Transformaciones previas
+
+Se han eliminado los datos correspondientes al año en curso (2017), ya que sólo había datos disponibles hasta mayo, y estamos trabajando con datos de años completos.
+
+
+# 2 Análisis mediante modelos ARIMA 
+
+Determinar el modelo ARIMA(p, d, q)× (P,D,Q)s (siendo s la estacionalidad) que se ajusta mejor a los datos.
+
+* Debe tenerse en cuenta si la varianza es constante o no (no transformar o transformación logarítmica) y si existe tendencia o no. 
+* Deben representarse la fas y la fap en cada paso. 
+* Deben presentarse al menos los valores del coeficiente de información de Akaike (AIC) y los valores de los parámetros del modelo en los pasos seguidos. 
+* Se debe comprobar que los residuos del modelo seleccionado siguen un ruido blanco. 
+* Estudiar si se puede simplificar el modelo
+
+
+## 2.1 Adquirir los datos de la web en formato csv y realizar su lectura desde R
+
+```{r}
+viajeros_ini <- read.csv("total_viajeros.csv", header=F, dec=".", sep=";")
+viajeros_ini <- ts(viajeros_ini[,2], start=2005, freq=12)
+str(viajeros_ini)
+viajeros_ini
+```
+
+## 2.2  Representar gráficamente de la serie
+```{r}
+plot(viajeros_ini,
+     xlab="año",
+     ylab="viajeros",
+     main="Total viajeros",
+     col="blue")
+
+```
+Observamos que la varianza no es constante, va cambiando, hay subidas y bajadas, aunque parece bastante homogénea.
+
+La tendencia es creciente hasta el 2008, entre los años 2008 y 2014 presenta tendencia descendente, y a partir de 2014 tendencia creciente.
+
+Se observa estacionalidad, pero vamos a hacer zoom entre los años centrales 2010 a 2012 para observar mejor la estacionalidad de la serie.
+
+```{r}
+plot(viajeros_ini,
+     xlab="año",
+     ylab="viajeros",
+     main="Total viajeros",
+     col="blue",
+     xlim=c(2010, 2012))
+
+```
+
+A continuación utilizaremos la funcion *decompose* con el objetivo de descomponer la serie temporal en las componentes estacional, tendencia e irregular, usando las medias móviles. y el modelo aditivo.
+
+```{r}
+componentes_viajeros=decompose(viajeros_ini)
+plot(componentes_viajeros, type="l", col="blue")
+
+# Componente estacional
+componentes_viajeros$seasonal
+# Componente tendencia
+componentes_viajeros$trend
+# Componente aleatoria
+componentes_viajeros$random
+```
+
+
+Tanto la componente estacional como la aleatoria son despreciables con respecto a los datos observados, puesto que estos últimos son varios órdenes de magnitud mayores. Por tanto, la influencia de estas dos componentes será pequeña.
+
+
+## 2.3 Determinar si es estacionaria o necesita alguna transformación previa 
+
+
+### 2.3.1 Homogeneidad de varianzas
+Respecto a la homogeneidad de la varianza considerar tan sólo la transformación logarítmica (no buscar otra transformación dentro de la familia Box-Cox)
+
+
+Dado que de la representación gráfica del apartado anterior observamos que la varianza no era constante, en primer lugar realizaremos un estudio de la homogeneidad de varianzas:
+```{r}
+# Instante de inicio de la serie
+start=start(viajeros_ini)
+
+# Instante de fin de la serie
+end=end(viajeros_ini)
+
+cat("Número de años en la serie= ", end-start)
+```
+
+
+```{r}
+anuales <- matrix(viajeros_ini, nr=12, byrow=F)
+x <- c(rep(0, 11))
+y <- c(rep(0, 11))
+for(i in 1:11){
+  x[i] <- mean(anuales[,i])
+  y[i] <- sd(anuales[,i])
+}
+plot(x,y)
+```
+
+Se aplica la transformación logarítmica a los datos y se calcula el modelo lineal
+
+```{r}
+x <- log(x)
+y <- log(y)
+regresion <- lm(y ~ x)
+regresion 
+```
+
+*1-lambda = 0.7921*, por tanto basta tomar *lambda* igual a 0, transformación logarítmica, en la familia Box-Cox.
+
+```{r}
+viajeros_log <- log(viajeros_ini)
+plot(viajeros_log, col="blue", xlab="año", ylab="log(viajeros)")
+```
+
+Observamos que no hemos ganado mucho con la transformación logarítmica.
+
+
+
+### 2.3.2 Estacionariedad en medias
+
+A continuación representaremos la funcion autocorrelación estimada de la serie para realizar un análisis visual, y determinar si es necesario realizar algún tipo de diferenciación de la serie para asegurar la estacionariedad en la media
+```{r}
+acf(viajeros_log, main="FAS log(viajeros)")
+```
+Aplicaremos una diferenciación de orden 1 a la serie sucesivamente hasta que exista estacionariedad en media. 
+```{r}
+viajeros_diff_regular <- diff(viajeros_log, lag = 1, differences = 1)
+acf(viajeros_diff_regular, main="FAS de log(viajeros) tras diferenciación regular")
+```
+
+Observando la función de autocorrelación vemos que existe estacionalidad de orden 12, por lo que es necesario aplicar diferenciaciones de orden 12 a la serie para eliminar la componente estacional.
+```{r}
+viajeros_diff_reg_sta <- diff(viajeros_diff_regular, lag = 12, differences = 1)
+plot(viajeros_diff_reg_sta)
+acf(viajeros_diff_reg_sta, main="FAS de log(viajeros) tras diferenciación regular y estacional")
+```
+
+
+## 2.4 Contrastar si la serie transformada puede considerarse estacionaria
+
+Para determinar si la serie diferenciada ya es estacionaria se suele aplicar un contraste de raíz unitaria. Este contraste es conocido como el contraste de raíz unitaria ampliado de *Dickey-Fuller* (ADF). 
+
+Contrasta la hipótesis nula de existencia de una raíz unitaria contra la alternativa de que no existen raíces unitarias
+
+H0: beta=1 existe raíz unitaria ==> No estacionaria
+
+H1: beta<1 no existe raíz unitaria
+
+```{r}
+adf.test(viajeros_diff_reg_sta)
+```
+
+*pvalor*=0.01 < 0.05, con lo que se rechaza la hipótesis nula, y por tanto se admite que **la serie transformada es estacionaria**.
+
+## 2.5 Identificar la estructura ARIMA de los datos
+
+Las funciones autocorrelacion estimadas (FAS) y autocorrelación parcial muestral (FAP) se suelen utilizar para identificar el modelo *ARIMA(p, d, q)× (P,D,Q)s* que mejor se ajusta a los datos. 
+
+Se utilizará como herramienta el análisis visual de las funciones *FAS* y *FAP* para determinar los parámetros *p*, *d* y *q* de la parte no estacional y los parámetros *P*, *D*, *Q* de la parte estacional del modelo.
+
+
+```{r}
+
+# FAS
+acf(viajeros_diff_reg_sta, main="FAS de log(viajeros) tras diferenciación regular y estacional")
+```
+
+Esta es la parte correpondiente al modelo *MA* medias móviles, hay 6 componentes significativas, pero nos quedaremos en MA(1) para simplificar al máximo ya que vamos a añadir un modelo *AR* también en la parte estacional
+
+```{r}
+# FAP
+pacf(viajeros_diff_reg_sta, main="FAP de log(viajeros) tras diferenciación regular y estacional")
+```
+
+Probaremos con:
+
+* parte regular: *MA(1)*
+
+* parte estacional: *AR(2)* o *ARMA(1,1)*
+
+* El parámetro *d* es igual a 0 porque con las transformaciones hemos eliminado la parte estacional.
+
+Probaremos por tanto con los siguientes modelos:
+
+* *ARIMA(0, 0, 1)× (2,0,0)12*
+
+* *ARIMA(0, 0, 1)× (1,0,1)12*
+
+A continuación verficiaremos ambos modelos utilizando el estadístico de *Ljung y Box*
+
+**Modelo ARIMA(0, 0, 1)× (2,0,0)12**
+```{r}
+fit1 <- arima(viajeros_diff_reg_sta, 
+              order=c(0,0,1), 
+              seasonal = list(order = c(2, 0, 0), period = 12))
+
+tsdiag(fit1)
+Box.test (fit1$residuals, lag = 1, type = "Ljung")
+plot(fit1$residuals)
+fit1
+```
+
+
+**Modelo ARIMA(0, 0, 1)× (1,0,1)12**
+```{r}
+fit2 <- arima(viajeros_diff_reg_sta,
+              order=c(0,0,1), 
+              seasonal = list(order = c(1, 0, 1), period = 12))
+tsdiag(fit2)
+Box.test (fit2$residuals, lag = 1, type = "Ljung")
+plot(fit2$residuals)
+fit2
+```
+
+Para ninguno de los dos modelos obtenidos se acepta la hipótesis de que los residuos del modelo se pueden considerar que provienen de un ruido blanco. Entre ambos modelos el que presenta menor AIC y por tanto se ajusta mejor es el modelo *fit2* (ARIMA(0, 0, 1)× (1,0,1)12). 
+
+Puede que los resultados obtenidos se deban a que hemos simplificado en exceso el modelo. En el siguiente apartado se realizará un mejor ajuste de los parámetros del modelo con ayuda de la función *auto.arima*.
+
+
+## 2.6 Estimar los parámetros del modelo
+
+Utilizaremos la función *auto.arima* de la librería *forecast* para obtener los parámetros del modelo ARIMA que mejor se ajustan a los datos. Esta función evalúa entre todos los posibles modelos, considerando diversos criterios (estacionariedad, estacionalidad, diferencias), y devuelve el que presente menor AIC (o el criterio de información especificado en la llamada)
+
+```{r}
+auto.fit = auto.arima(viajeros_diff_reg_sta, approximation=FALSE, trace=FALSE)
+```
+
+```{r}
+summary(auto.fit)
+```
+
+El método auto.arima nos devuelve que el modelo que mejor se ajusta es el *ARIMA(0,0,2)(2,0,1)[12]*
+
+
+## 2.7 Diagnosticar y seleccionar el modelo final
+
+A continuación construiremos el modelo final devuelto por la función de ajuste auto.arima y que presenta mejor ajuste a los datos
+```{r}
+best.fit <- arima(viajeros_diff_reg_sta, 
+                  order=c(0,0,2), 
+                  seasonal = list(order = c(2,0,1), period = 12))
+```
+
+```{r}
+summary(best.fit)
+```
+
+
+```{r}
+tsdiag(best.fit)
+```
+
+Por último, vamos a verificar el modelo mediante el estadístico de *Ljung y Box*
+```{r}
+Box.test(best.fit$residuals, lag = 1, type = "Ljung")
+```
+
+En este caso el *pvalor*=0.7629 > 0.05, por lo que se acepta la hipótesis nula, y por tanto los residuos provienen de un ruido blanco.
+```{r}
+plot(best.fit$residuals)
+best.fit
+```
+El AIC de este modelo es el menor de todos los modelos obtenidos:
+
+```{r}
+cat("AIC del modelo final (best.fit) = ", best.fit$aic)
+```
+
+## 2.8 Predecir la serie temporal para el año siguiente al último dato disponible
+
+En primer lugar representaremos la serie temporal transformada y la predicción de un año
+```{r}
+plot(viajeros_diff_reg_sta,
+     xlim=c(2005, 2018))
+
+
+viajeros.pred<-predict(best.fit, n.ahead=12)
+
+lines(viajeros.pred$pred, col="red")
+```
+
+A continuación construiremos la serie *viajeros_all* con la concatenación de las observaciones de la serie original y las predicciones
+```{r}
+viajeros_all <- c(viajeros_diff_reg_sta[1L:131L],  # serie original => (2017-2005)*12-13=131
+                  viajeros.pred$pred[1L:12L])      # predicción
+
+# Hemos perdido 13 datos porque hicimos una diferenciacion de orden 12 y otra de orden 1.
+# Por tanto, los datos comienzan 13 meses despues de la serie original (enero 2005)
+# Es decir, febrero de 2006
+viajeros_all <- ts(viajeros_all, start=c(2006, 2), freq=12)
+plot(viajeros_all, type="l")
+```
+
+Deshacemos la diferenciación de orden 12 y a continuación la de orden 1, tomando como datos los originales con los que se realizó la diferenciación correspondiente 
+
+```{r}
+viajeros_all <- diffinv(viajeros_all,
+                        lag = 12, 
+                        differences = 1, 
+                        xi = c(viajeros_diff_regular[1],  viajeros_diff_regular[2],  
+                               viajeros_diff_regular[3],  viajeros_diff_regular[4],  
+                               viajeros_diff_regular[5],  viajeros_diff_regular[6],
+                               viajeros_diff_regular[7],  viajeros_diff_regular[8],  
+                               viajeros_diff_regular[9],  viajeros_diff_regular[10], 
+                               viajeros_diff_regular[11], viajeros_diff_regular[12]))
+
+viajeros_all <- diffinv(viajeros_all, 
+                        lag = 1, 
+                        differences = 1, 
+                        xi = viajeros_log[1])
+```
+
+Deshacemos la transformacion logarítmica
+```{r}
+viajeros_all = exp(viajeros_all)
+```
+
+Construimos la serie temporal completa con la misma fecha de inicio que la original
+```{r}
+viajeros_all <- ts(viajeros_all, start=2005, freq=12)
+```
+
+Representación gráfica de la serie temporal completa y la predicción
+```{r}
+plot(viajeros_all, type="l", 
+     xlab="año",
+     ylab="viajeros",
+     xlim=c(2005, 2018), 
+     col="red")
+
+# superposición de la serie original
+lines(viajeros_ini, col="blue")
+```
+

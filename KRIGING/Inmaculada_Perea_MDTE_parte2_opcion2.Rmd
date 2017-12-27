@@ -1,0 +1,664 @@
+---
+title: "Evaluación MDTE"
+subtitle: 'Opción 2: Técnicas de krigeado sobre datos *meuse*'
+author: "Inmaculada Perea Fernández"
+date: "Junio 2017"
+output: pdf_document
+---
+
+
+Aplicar técnicas de krigeado a una de las variables logaritmo de la concentración de cadmio, cobre o plomo del conjunto de datos "meuse", realizando la predicción sobre el conjunto pixelado "meuse.grid".
+
+**Carga de librerías necesarias**
+
+```{r message=FALSE, warning=FALSE}
+if (!require('sp')) install.packages('sp'); library('sp')
+if (!require('lattice')) install.packages('lattice'); library('lattice')
+if (!require('xts')) install.packages('xts'); library('xts')
+if (!require('gstat')) install.packages('gstat'); library('gstat')
+```
+
+
+# 1 Descripción de la variable (resumen y representaciones gráficas)
+
+## 1.1 Carga de datos *meuse*
+```{r}
+data(meuse)
+dim(meuse) 
+names(meuse)
+str(meuse)
+head(meuse)
+```
+
+El conjunto de datos *meuse* cuenta con 155 observaciones y 14 variables. 
+
+Este conjunto de datos proporciona ubicaciones y concentraciones de metales pesados en la capa superficial del suelo, junto con una serie de variables geofísicas, recogidos en una llanura de inundación del río Meuse.
+
+Las observaciones están georreferenciadas en coordenadas UTM (x e y). 
+
+* **cadmium**: concentración de cadmio (ppm)
+* **copper**: concentración de cobre (ppm)
+* **lead**: concentración de plomo (ppm)
+* **zinc**: concentración de zinc (ppm)
+* **elev**: elevación sobre el nivel de lecho del rio (en metros)
+* **dist**: distancia topométrica al grid o rejilla 
+* **om**: contenido de materia orgánica (%) del suelo 
+* **ffreq**: frecuencia de inundación (1=1 vez en 2 años; 2=1 vez en 10 a.; 3=1 vez en 50 años)
+* **soil**: tipo de suelo (1-caliza; 2-arcilla pesada; 3-arcilla limosa)
+* **lime**: clase de limo (0-ausente; 1-presente)
+* **landuse**: uso de la parcela (diversas modalidades)
+* **dist.m**: distancia al rio en metros, obtenida durante el trabajo de campo
+
+## 1.2 Carga de los datos *meuse.grid*
+
+```{r}
+data(meuse.grid)
+dim(meuse.grid) 
+names(meuse.grid)
+str(meuse.grid)
+head(meuse.grid)
+```    
+  
+El conjunto de datos *meuse.grid* cuenta con 3103 observaciones y 7 variables.
+
+Las observaciones están georreferenciadas en coordenadas UTM (x e y). En cada localización se han recogido:
+
+* **x**: Coordenada X 
+* **y**: Coordenada Y 
+* **dist**: distancia al borde de río Meuse, normalizada a [0,1]
+* **ffreq**: freq.inundación (1=1 vez en 2 años; 2=1 vez en 10 a.; 3=1 vez en 50 años)
+* **soil**: tipo de suelo (1-caliza; 2-arcilla pesada; 3-arcilla limosa)
+* **part.a**: división arbitraria del área en dos zonas, Zona A
+* **part.b**: división arbitraria del área en dos zonas, Zona B
+  
+
+## 1.3 Preparación de los datos
+
+### 1.3.1 Datos *meuse*
+```{r}
+coordinates(meuse) = ~x+y  # Asignación de coordenadas
+class(meuse)
+names(meuse)
+```
+
+### 1.3.2 Datos *meuse.grid*
+```{r}
+coordinates(meuse.grid) = ~x+y  # Asignación de coordenadas
+gridded(meuse.grid) = TRUE      # Determinación como "rejilla"
+class(meuse.grid)
+names(meuse.grid)
+```
+
+Después de la asignación de coordenadas el conjunto de datos deja de ser un dataframe para ser un dataframe de PUNTOS espaciales (puntos, no poligonos)
+
+## 1.4 Representación gráfica
+Nos centraremos en la variable concentración de **plomo (lead)**.
+
+### 1.4.1 Histograma de la variable *lead*
+
+```{r}
+hist(meuse$lead, 
+     breaks = seq(0, 800, by = 75), 
+     col = "lightblue",
+     border = "red", 
+     main = "Concentración de plomo (ppm)")
+
+rug(meuse$lead)
+
+# Buscando un comportamiento aproximado a la normal se utiliza la transformación logarítmica
+summary(log(meuse$lead))
+
+hist(log(meuse$lead), 
+     breaks = seq(3, 7, by = 0.3), 
+     col = "lightblue",
+     border = "red", 
+     main = "Log-Concentración de plomo (ppm)")
+
+rug(log(meuse$lead))
+```
+
+Con un comportamiento gaussiano no necesito tantas muestras para que funcione bien.
+
+### 1.4.2 Gráfica de burbujas
+
+```{r}
+bubble(meuse, c("lead"), col=c("#00ff0088", "#00ff0088"), main = "Concentración de plomo (ppm)")
+```
+
+### 1.4.3 Gráficos de puntos/colores o caracteres
+```{r}
+spplot(meuse["lead"], 
+       main="concentración de plomo", 
+       scales=list(draw=TRUE),
+       xlab="X", ylab="Y",
+       col.regions=terrain.colors(10))
+
+spplot(meuse, c("ffreq"), 
+       cex=1, pch=c(2,1,3), 
+       scales=list(draw=TRUE),
+       legendEntries=c("1(2años)","1(10años)","1(50años)"), 
+       main=" Frecuencia de inundacion ", 
+       col.regions= "blue", 
+       key.space=list(x=0.1,y=.95,corner=c(0,1)))
+```
+
+### 1.4.4 Gráficos múltiples
+```{r}
+spplot(meuse, c("zinc","lead","cadmium","copper"), 
+       main="concentraciones de minerales pesados", 
+       scales=list(draw=TRUE),
+       xlab="X", ylab="Y")
+
+spplot(meuse, c("dist","dist.m"),main="Distancias", 
+       col.regions=topo.colors(6), 
+       scales=list(draw=TRUE),
+       xlab="X", ylab="Y")
+```
+
+
+### 1.4.5 Plots para visualizar el fichero *meuse.grid*
+```{r}
+spplot(meuse.grid, c("dist"), 
+       col.regions=terrain.colors(20),
+       main="Distancia al rio Meuse", 
+       scales=list(draw=TRUE),
+       xlab="X", ylab="Y")
+
+```
+
+# 2 Construcción del variograma muestral y ajuste a un modelo teórico de la variable objetivo
+
+## 2.1 Construcción del variograma muestral
+
+Calculo el variograma muestral de la variable *lead* con la funcion *variogram*
+```{r}
+(lead.variogram = variogram(log(lead)~1,  # object: variable  
+                            meuse))       # conjunto de datos
+```
+
+```{r}
+plot(lead.variogram, col="blue", main="Semivariograma experim. Log(Plomo)")
+```
+
+Se observa una aproximacion al efecto pepita.
+
+## 2.2 Ajuste al modelo teórico
+
+Utilizaremos la función *fit.variogram* para elegir de entre todos los modelos el mejor. Con la función *vgm* generaremos un modelo de variograma según el modelo indicado en el parámetro *model* (por defecto Sph)
+
+Vamos a realizar ajustes con distintos modelos para elegir el que menor error cuadrático medio
+```{r}
+cat(" Spherical = ", attributes(fit.variogram(lead.variogram, model=vgm(1, "Sph", 900, 1)))$SSErr, "\n",
+"Pentaspherical = ", attributes(fit.variogram(lead.variogram, model=vgm(1, "Pen", 900, 1)))$SSErr, "\n",
+"Gaussian = ", attributes(fit.variogram(lead.variogram, model=vgm(1, "Gau", 900, 1)))$SSErr, "\n",
+"Circular = ", attributes(fit.variogram(lead.variogram, model=vgm(1, "Cir", 900, 1)))$SSErr, "\n",
+"Exponential = ", attributes(fit.variogram(lead.variogram, model=vgm(1, "Exp", 900, 1)))$SSErr)
+```
+
+Según el anteior criterio se selecciona el modelo **Esférico**.
+
+```{r}
+lead.fit = fit.variogram(lead.variogram,                     # variograma muestral
+                         model = vgm(0.5, "Sph", 900, 0.1))  # valores iniciales del modelo
+lead.fit
+```
+
+Se ha creado el objeto *lead.fit* que contiene el modelo esférico estimado de la variable log(lead) con la siguiente información
+
+```{r}
+plot(lead.variogram, lead.fit, main="Ajuste variograma Modelo Esférico")
+
+print(plot(lead.variogram, plot.numbers = T, pch =18, col = "darkblue", 
+           model = lead.fit, main="Ajuste variograma Modelo Esférico"))
+```
+
+# 3 Kriging ordinario para la variable objetivo
+
+
+## 3.1 Cálculo de las predicciones kriging ordinario
+
+Utilizamos las funcion *krige* para realizar las predicciones *kriging* sobre los puntos definidos en el grid
+```{r}
+lead.kriged = krige(log(lead)~1,       # formula
+                    meuse,             # datos espaciales
+                    meuse.grid,        # datos donde se van a hacer las predicciones
+                    model = lead.fit)  # modelo
+```
+
+
+Se ha creado un objeto que se describe en las siguientes órdenes:
+```{r}
+names(lead.kriged)
+dim(lead.kriged)
+lead.kriged$var1.pred[1:5]   # Predicción en los cinco primeros casos
+lead.kriged$var1.var[1:5]    # Varianza de la Predicción en los cinco primeros casos
+```
+
+Las zonas de la frontera superior son las zonas con mayor concentración de plomo. Las zonas mas alejadas del rio tienen menos concentración. Por tanto, parece que el origen de la contaminación es el rio.
+
+
+## 3.2 Representación gráfica
+
+Plot espacial de la predicción con graduación de colores 
+```{r}
+spplot(lead.kriged["var1.pred"], main="Plot espacial de la predicción con graduación de colores" )
+```
+
+Plot espacial de la predicción y la varianza de la predicción con graduación de colores
+```{r}
+spplot(lead.kriged, main="Plots espaciales de la predicción y la varianza de la predicción" )
+```
+
+Plot espacial de la predicción con líneas de contorno
+```{r}
+spplot(lead.kriged, zcol="var1.pred", pretty=T, contour=T, col.regions=bpy.colors(64), 
+       main="Plot espacial de la predicción con líneas de contorno", 
+       xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+```
+
+Representación de curva de nivel de las predicciones, incluyendo los puntos observados
+```{r}
+contour(lead.kriged, main="Curva de nivel de las predicciones con las localizaciones muestrales")
+points(coordinates(meuse))
+```
+
+Representación espacial de la predicción con graduación de colores
+```{r}
+spplot(lead.kriged, zcol="var1.pred", pretty=T, col.regions=bpy.colors(64), 
+       main="Plot espacial de la predicción con graduación de colores", 
+       xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+```
+
+
+# 4 Kriging universal para la variable objetivo
+
+Se realizará el estudio con un polinomio de grado 1 (1,x,y) para la variable objetivo *lead* (plomo)
+
+## 4.1 Ajuste lineal y determinación de residuos
+
+En primer lugar, realizaremos la búsqueda de la tendencia lineal (en función de las coordenadas).
+Obtenemos el modelo de regresión para la variable original *lead* y su transformada log(lead) y determinamos cuál de ellos resulta más adecuado.
+
+```{r}
+summary(lm(formula=lead ~ coordinates(meuse), data=meuse))
+
+llead<-log(meuse$lead)
+summary(lm(formula=llead ~ coordinates(meuse), data=meuse))
+```
+
+Resulta más adecuado el modelo sobre log(lead), ya que presenta mayor R2.
+
+A continuación se procede a estimar el variograma asociado a los residuos del modelo.
+
+
+## 4.2 Estimación del variograma de los residuos MCO
+
+Se crea el variograma experimental o muestral de los residuos (objeto "lead.res.variogram") y se compara con el semivariograma muestral obtenido para los datos originales, almacenado en el objeto "lead.variogram"
+
+quito el efecto de las coordenadas
+En verde hago una estimación del universal, donde las gammas no son iguales
+```{r}
+lead.res.variogram = variogram(log(lead)~x+y, meuse)
+
+comparar.vgm <- data.frame(np = lead.variogram$np, 
+                           dist = lead.variogram$dist, 
+                           gamma.ok=lead.variogram$gamma,   
+                           gamma.uk=lead.res.variogram$gamma, 
+                           gamma.dif = lead.variogram$gamma - lead.res.variogram$gamma)
+
+#Visualización de la comparación de los variogramas
+comparar.vgm 
+
+plot(comparar.vgm$gamma.ok ~ comparar.vgm$dist, pch=20, col="blue", type="b", 
+     xlab="Distancia", ylab="Gamma (semivariograma)", 
+     ylim=c(0,max(comparar.vgm$gamma.ok, comparar.vgm$gamma.uk)),
+     main = " Variograma, Log(Zinc)", sub="OK:azul, UK:verde")
+
+points(comparar.vgm$gamma.uk  ~ comparar.vgm$dist, pch=20, col="green", type="b")
+```
+
+Dadas las diferencias, mantenemos el variograma asociado a los residuos MCO.
+
+**Ajuste a un modelo teórico**
+
+Primero seleccionamos el mejor modelo en función de la suma de cuadrados del error.
+```{r}
+attributes(fit.variogram(lead.res.variogram, model=vgm(1, "Sph", 900, 1)))$SSErr
+attributes(fit.variogram(lead.res.variogram, model=vgm(1, "Pen", 900, 1)))$SSErr
+attributes(fit.variogram(lead.res.variogram, model=vgm(1, "Gau", 900, 1)))$SSErr
+attributes(fit.variogram(lead.res.variogram, model=vgm(1, "Cir", 900, 1)))$SSErr
+attributes(fit.variogram(lead.res.variogram, model=vgm(1, "Exp", 900, 1)))$SSErr
+```
+
+
+Seleccionamos el modelo exponencial porque es el que tiene menor error. Lo almacenamos en un objeto "lead.res.fit"
+
+```{r}
+lead.res.fit <- fit.variogram(lead.res.variogram, model = vgm(1, "Exp", 900, 1))
+lead.res.fit
+plot(lead.res.variogram, lead.res.fit)
+```
+
+
+## 4.3 Predicciones Kriging Universal
+
+Se crea el objeto kriging universal para log(lead), y se representa gráficamente las predicciones en el fichero rejilla.
+
+```{r}
+lead.ukriged = krige(log(lead)~x+y, meuse, meuse.grid, model = lead.res.fit)
+
+spplot(lead.ukriged["var1.pred"], main="Predicciones del kriging universal. Variable log(lead)")
+
+spplot(lead.ukriged, zcol="var1.pred", pretty=T, contour=T, col.regions=bpy.colors(64),
+       main="Predicciones del kriging universal. Variable log(lead)",
+       xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+
+spplot(lead.ukriged, zcol="var1.pred", pretty=T, contour=T, col.regions=bpy.colors(64), 
+       main="Predicciones del kriging universal. Variable log(lead)",
+       xlab="Etq X",ylab="Etiq Y", scales=list(draw=T), cuts=8)
+```
+
+
+## 4.4 Cálculo y representación de diferencias entre kriging ordinario y universal 
+
+Creamos un data.frame para evaluar las diferencias
+
+```{r}
+dif.uk.ok <- data.frame(dif.pred = lead.ukriged$var1.pred - lead.kriged$var1.pred, 
+                        dif.var = lead.ukriged$var1.var - lead.kriged$var1.var)
+summary(dif.uk.ok)
+```
+
+Se observa que las predicciones son similares, aunque las varianzas de las estimaciones (y por tanto, los errores de estimación) son menores a través del kriging universal.
+
+
+# 5 Kriging deriva externa para la variable objetivo con predictor distancia al rio
+
+## 5.1 Búsqueda de la tendencia lineal en función de la distancia al río
+
+```{r}
+plot(log(lead)~ dist, meuse)
+abline(lm(formula=log(lead) ~ dist, data=meuse), col="red")
+
+summary(lm(formula=log(lead) ~ dist, data=meuse))
+summary(lm(formula=log(lead) ~ coordinates(meuse)+dist, data=meuse))
+```
+
+Parece más adecuado el primero, dado que la capacidad de explicación de las coordenadas es muy débil.
+
+## 5.2 Construcción del variograma (de los residuos) muestral y ajuste modélo teórico
+
+Se crea el variograma experimental o muestral de los residuos (objeto "lead.resdist.vgm")" y se compara con el semivariograma muestral obtenido para los datos originales, almacenado en el objeto "lead.variogram"
+
+```{r}
+lead.resdist.vgm = variogram(log(lead)~dist, meuse)
+
+rm(comparar.vgm) # Para eliminar el objeto ya existente con este nombre
+
+comparar.vgm <- data.frame(np = lead.variogram$np, 
+                           dist = lead.variogram$dist, 
+                           gamma.ok = lead.variogram$gamma,   
+                           gamma.ked = lead.resdist.vgm$gamma, 
+                           gamma.dif = lead.variogram$gamma - lead.resdist.vgm$gamma)
+
+#Visualización de la comparación de los variogramas
+comparar.vgm
+
+plot(comparar.vgm$gamma.ok ~ comparar.vgm$dist, pch=20, col="blue", type="b", 
+     xlab="Distancia", ylab="Gamma (semivariograma)", 
+     ylim=c(0,max(comparar.vgm$gamma.ok, comparar.vgm$gamma.ked)),
+     main = " Variograma, Log(Plomo)", sub="OK:azul, KED:verde")
+
+points(comparar.vgm$gamma.ked  ~ comparar.vgm$dist, pch=20, col="green", type="b")
+```
+
+
+Dadas las diferencias, mantenemos el variograma asociado a los residuos MCO.
+
+## 5.3 Ajuste a un modelo teórico
+
+Primero seleccionamos el mejor modelo en función de la suma de cuadrados del error.
+
+```{r}
+attributes(fit.variogram(lead.resdist.vgm, model=vgm(1, "Sph", 900, 1)))$SSErr
+attributes(fit.variogram(lead.resdist.vgm, model=vgm(1, "Pen", 900, 1)))$SSErr
+attributes(fit.variogram(lead.resdist.vgm, model=vgm(1, "Gau", 900, 1)))$SSErr
+attributes(fit.variogram(lead.resdist.vgm, model=vgm(1, "Cir", 900, 1)))$SSErr
+attributes(fit.variogram(lead.resdist.vgm, model=vgm(1, "Exp", 900, 1)))$SSErr
+```
+
+Seleccionamos el modelo Circular y lo almacenamos en un objeto "lead.resdist.fit"
+
+```{r}
+lead.resdist.fit <- fit.variogram(lead.resdist.vgm, model = vgm(1, "Cir", 900, 1))
+
+lead.resdist.fit
+plot(lead.resdist.vgm, lead.resdist.fit)
+```
+
+
+## 5.4 Predicciones Kriging con Deriva Externa
+
+Se crea el objeto kriging con Deriva Externa para log(lead), y se representa gráficamente las predicciones en el fichero rejilla.
+
+
+```{r}
+lead.dekriged = krige(log(lead)~ dist, meuse, meuse.grid, model = lead.resdist.fit)
+
+plot.pred.dekriged <- spplot(lead.dekriged, zcol="var1.pred", pretty=T, contour=T,
+                             col.regions=bpy.colors(64), 
+                             main="Predicciones KDE (distancia al rio)", 
+                             xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+
+plot.var.dekriged <- spplot(lead.dekriged, zcol="var1.var", pretty=T, contour=T,
+                            col.regions=bpy.colors(64), 
+                            main="Varianzas KDE (distancia al rio)", 
+                            xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+
+print(plot.pred.dekriged, split=c(1,1,2,1), more =T)
+
+print(plot.var.dekriged, split=c(2,1,2,1), more =F)
+```
+
+
+## 5.5 Cálculo y representación de diferencias entre kriging con deriva externa y universal
+
+A continuación calcularemos la diferencia entre kriging universal y con deriva externa. No vamos a comparar con kriging ordinario porque en el apartado anterior ya vimos que kriging universal presentaba menor error.
+
+**Recorrido de las predicciones**
+
+```{r}
+range(lead.ukriged$var1.pred, lead.dekriged$var1.pred)
+```
+
+**Recorrido de las varianzas de las estimaciones**
+```{r}
+range(lead.ukriged$var1.var, lead.dekriged$var1.var)
+```
+
+**Parámetros "at" para los gráficos comparativos**
+
+```{r}
+at.pred = 4:8
+at.var = seq(0, 0.4, by=0.05)
+
+plot.1 <-spplot(lead.dekriged , zcol="var1.pred", pretty=T, contour=F,
+                col.regions=bpy.colors(64), 
+                main = "Predicciones KDE (DIST)", 
+                xlab="Etq X", ylab="Etiq Y", scales=list(draw=T), at=at.pred)
+
+plot.2 <-spplot(lead.dekriged , zcol="var1.var", pretty=T, contour=F, 
+                col.regions=bpy.colors(64), main = "Var.Pred. KDE (DIST)", 
+                xlab="Etq X", ylab="Etiq Y", scales=list(draw=T), at=at.var)
+
+plot.3 <- spplot(lead.ukriged, zcol="var1.pred", pretty=T, contour=F, 
+                 col.regions=bpy.colors(64), main="Predicciones K. UNIVERSAL", 
+                 xlab="Etq X", ylab="Etiq Y", scales=list(draw=T), at=at.pred)
+
+plot.4 <- spplot(lead.ukriged, zcol="var1.var", pretty=T, contour=F, 
+                 col.regions=bpy.colors(64), 
+                 main="Var.Pred. K. UNIVERSAL", 
+                 xlab="Etq X", ylab="Etiq Y", scales=list(draw=T), at=at.var)
+
+print(plot.1, split=c(1,1,2,2), more =T)
+
+print(plot.2, split=c(1,2,2,2), more =T)
+
+print(plot.3, split=c(2,1,2,2), more =T)
+
+print(plot.4, split=c(2,2,2,2), more =F)
+
+```
+
+
+**Diferencias entre las predicciones y los errores de estimación**
+```{r}
+# Diferencia en las predicciones
+summary(lead.ukriged$var1.pred - lead.dekriged$var1.pred)
+
+# Diferencia en las varianzas de las predicciones
+summary(lead.ukriged$var1.var  - lead.dekriged$var1.var)
+```
+
+Se observa predicciones similares, con errores de estimación ligeramente mayores en el kriging universal.
+
+
+# 6 Kriging residual directo para la variable objetivo con predictor distancia al rio
+
+
+## 6.1 Paso 1
+
+**Estimación de los parámetros que determinan la deriva a través del método de mínimos cuadrados ordinarios (MCO)**            
+
+Se aplica la función "lm" (linear model) indicando (var_objetivo~var_explicativas, conjunto_datos)
+```{r}
+deriva=lm(log(lead)~dist, meuse)
+summary(deriva)
+```
+
+Se salvan los residuos ordinarios en una variable que se incluye en el conjunto de datos original (se hace copia para mantener el inicial) 
+```{r}
+R0lnplomo<-residuals(deriva)
+meuse2=meuse
+meuse2@data=cbind(meuse2@data, R0lnplomo)
+```
+
+## 6.2 Paso2
+
+**Kriging ordinario sobre los residuos del método de mínimos cuadrados ordinarios (MCO)**
+
+Se inicia el proceso, estimando el modelo de semivariograma teórico.
+
+Con las órdenes:
+
+    R0.vgm = variogram(R0lnplomo~1,meuse2)
+    attributes(fit.variogram(R0.vgm, model=vgm(0.15, "Sph", 900, 0.1)))$SSErr
+    attributes(fit.variogram(R0.vgm, model=vgm(0.15, "Pen", 900, 0.1)))$SSErr
+    attributes(fit.variogram(R0.vgm, model=vgm(0.15, "Gau", 900, 0.1)))$SSErr
+    attributes(fit.variogram(R0.vgm, model=vgm(0.15, "Cir", 900, 0.1)))$SSErr
+    attributes(fit.variogram(R0.vgm, model=vgm(0.15, "Exp", 900, 0.1)))$SSErr
+
+Se podría ajustar el modelo que coincidirá con el obtenido en el método anterior: *lead.resdist.fit*
+
+Una vez obtenido el variograma teórico de los residuos, se realiza el krigeado de los residuos, considerando el conjunto de datos grid o rejilla inicial.
+
+
+```{r}
+R0.kriged = krige(R0lnplomo~1, meuse2, meuse.grid, model = lead.resdist.fit)
+```
+
+## 6.3 Paso 3
+
+**Cálculo de la predicción del proceso como suma de la deriva ajustada y el ajuste de los residuos realizados a través del Kriging**
+
+La predicción se realiza sobre la rejilla, para lo cual se hace previamente una copia y se incrustan dichas predicciones
+
+```{r}
+Predderiva = predict(deriva, meuse.grid)   # Predicción de la deriva
+Predresid = R0.kriged@data$var1.pred       # Predicción kriging de los residuos
+Predfinal = Predderiva+Predresid           # Predicción conjunta
+
+var.predderiva = predict(deriva, meuse.grid, se.fit=TRUE)$se.fit 
+var.predresid  = R0.kriged@data$var1.var
+var.predfinal  = var.predderiva + var.predresid
+
+meuse2.grid=meuse.grid
+meuse2.grid@data=cbind(meuse2.grid@data, Predfinal, var.predfinal)
+
+spplot(meuse2.grid, zcol="Predfinal", pretty=T, contour=T, col.regions=bpy.colors(64), 
+   main="Prediciones Kriging Residual", xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+
+spplot(meuse2.grid, zcol="var.predfinal", pretty=T, contour=T, col.regions=bpy.colors(64), 
+   main="Varianzas prediciones Kriging Residual", xlab="Etq X", ylab="Etiq Y", scales=list(draw=T))
+
+```
+
+
+
+## 6.4 Cálculo y representación de diferencias  entre los dos métodos  kriging con deriva externa 
+
+Determinamos el recorrido de las predicciones y las varianzas de las estimaciones
+
+
+```{r}
+range(meuse2.grid$Predfinal, lead.dekriged$var1.pred)
+range(meuse2.grid$var.predfinal, lead.dekriged$var1.var)
+
+```
+
+
+
+Determinamos los parámetros "at" para los gráficos comparativos
+
+```{r}
+at.pred = 4:8
+at.var = seq(0, 0.4, by=0.05)
+
+plot.1 <-spplot(lead.dekriged , zcol="var1.pred", pretty=T, contour=F, col.regions=bpy.colors(64),
+                main = "Predicciones KDE (DIST)", xlab="Etq X", ylab="Etiq Y", 
+                scales=list(draw=T), at=at.pred)
+
+plot.2 <-spplot(lead.dekriged , zcol="var1.var", pretty=T, contour=F, col.regions=bpy.colors(64),
+                main = "Var.Pred. KDE (DIST)", xlab="Etq X", ylab="Etiq Y", 
+                scales=list(draw=T), at=at.var)
+
+plot.3 <- spplot(meuse2.grid, zcol="Predfinal", pretty=T, contour=F, col.regions=bpy.colors(64), 
+                 main="Predicciones K. RES. DIRECTO", xlab="Etq X", ylab="Etiq Y", 
+                 scales=list(draw=T), at=at.pred)
+
+plot.4 <- spplot(meuse2.grid, zcol="var.predfinal", pretty=T, contour=F, col.regions=bpy.colors(64), 
+                 main="Var.Pred. K. RES.DIRECTO", xlab="Etq X", ylab="Etiq Y", 
+                 scales=list(draw=T), at=at.var)
+
+print(plot.1, split=c(1,1,2,2), more =T)
+
+print(plot.2, split=c(1,2,2,2), more =T)
+
+print(plot.3, split=c(2,1,2,2), more =T)
+
+print(plot.4, split=c(2,2,2,2), more =F)
+
+```
+
+
+
+**Diferencias entre las predicciones**
+```{r}
+summary(meuse2.grid$Predfinal - lead.dekriged$var1.pred)
+```
+
+**Diferencias entre los errores de estimación**
+```{r}
+summary(meuse2.grid$var.predfinal  - lead.dekriged$var1.var )
+```
+
+
+# 7 Conclusión
+
+Se observa predicciones similares, con errores de estimación mayores en el kriging residual directo, por tanto el modelo que mejor resultados presenta es el kriging con deriva externa.
+
+
+
+
+
+
